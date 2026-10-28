@@ -4,6 +4,32 @@
 
 Automated data broker opt-out runner for macOS, Linux, and Windows. Removes your personal information from **500+ people-search sites and data broker databases** on a monthly schedule - with CAPTCHA solving, persistent state tracking (so completed opt-outs aren't resubmitted every run), and an iMessage notification when done. [**Privacy & data flow ->**](docs/PRIVACY.md)
 
+## What this fork adds
+
+A fork of [stephenlthorn/auto-identity-remove](https://github.com/stephenlthorn/auto-identity-remove) that keeps you in control and needs no paid services.
+
+| Feature | Original | This fork |
+|---|---|---|
+| **CAPTCHAs** (`--handoff`) | Paid solver (CapSolver), else skipped | The browser pauses on the CAPTCHA; you solve it, press Enter, and it submits |
+| **Broker logins** | Setup asks for Spokeo / BeenVerified / MyLife accounts up front | Never asked at setup; asked only when your listing is actually found |
+| **Breaches** (`--breach-fix`) | Paid Have I Been Pwned key; report only | Free lookup via [XposedOrNot](https://xposedornot.com), then opens each breached site (worst first) for you to log in and change the password or delete the account. Stealer-log advice included |
+| **Outside the US** (`--global`) | US-only brokers always skipped | Optionally search them too; US credit-freeze advice shown to US users only |
+| **Quick tests** (`--only`) | Still ran ~490 generic brokers | Runs only the brokers you name |
+| **Windows** (`scripts/aidr.ps1`) | Passphrase via environment variable | Hidden passphrase prompt, cleared after the run |
+| **Stealth** (`--no-stealth`) | Always masks automation | Can be turned off |
+
+Dependencies with known high-severity CVEs (axios, follow-redirects, form-data) are updated.
+
+```powershell
+# Windows, encrypted config
+.\scripts\aidr.ps1 setup                                   # one-time setup (no broker accounts asked)
+.\scripts\aidr.ps1 --preview --global --only "Spokeo,Radaris"  # fills forms, submits nothing
+.\scripts\aidr.ps1 --handoff --no-stealth                  # real run; you solve CAPTCHAs / log in when asked
+.\scripts\aidr.ps1 --breach-fix                            # free breach check, then fix each site
+```
+
+On macOS/Linux use `node bin/aidr.js run --handoff` and `node bin/aidr.js breach-fix`.
+
 ## What it does
 
 Each month, the script:
