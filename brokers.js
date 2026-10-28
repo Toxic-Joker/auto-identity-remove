@@ -149,6 +149,7 @@ function buildBrokers(person) {
 
   {
     name: 'Spokeo',
+    needsAccount: true, // opt-out needs a login; asked for only when a listing is found
     method: 'search-form',
     searchUrl: `https://www.spokeo.com/search?q=${enc(N)}&type=pp&state=${ST}`,
     listingPattern: /spokeo\.com\/[^/]+\/[^/]+\/[^/]+-p\d+/i,
@@ -202,6 +203,7 @@ function buildBrokers(person) {
 
   {
     name: 'BeenVerified',
+    needsAccount: true, // opt-out needs a login; asked for only when a listing is found
     method: 'search-form',
     searchUrl: 'https://www.beenverified.com/app/optout/search',
     listingPattern: /beenverified\.com/i,
@@ -262,6 +264,7 @@ function buildBrokers(person) {
 
   {
     name: 'MyLife',
+    needsAccount: true, // opt-out needs a login; asked for only when a listing is found
     method: 'search-form',
     searchUrl: `https://www.mylife.com/find-people/results.pubview?searchtype=PEOPLE&firstname=${enc(F)}&lastname=${enc(L)}&state=${ST}`,
     listingPattern: /mylife\.com\/[^/]+\/[^/]+-\d+\.html/i,

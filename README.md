@@ -115,7 +115,21 @@ Every subcommand maps to the equivalent `node watcher.js --<flag>` invocation.
 
 ---
 
-## CapSolver (optional but recommended)
+## Solve CAPTCHAs yourself (`--handoff`)
+
+Prefer not to use a paid solver? Run with `--handoff`:
+
+```bash
+node bin/aidr.js run --handoff --no-stealth
+```
+
+The browser opens visibly. When a broker's form is behind a CAPTCHA, the run
+brings that page to the front and waits; solve it, press Enter in the terminal,
+and the form is submitted. Type `s` + Enter to skip that broker (it goes to
+your manual list). `--handoff` never calls CapSolver, and dry-run/preview never
+prompt. `--no-stealth` turns off the automation-fingerprint masking.
+
+## CapSolver (optional)
 
 Some opt-out forms have reCAPTCHA. Without CapSolver, those sites go to your manual list instead of being handled automatically.
 

@@ -160,3 +160,17 @@ test('broker without usOnly flag is NOT skipped for a non-US user', async () => 
   );
   assert.equal(skipEntry, undefined, 'global broker must not be skipped by the usOnly guard');
 });
+
+test('usOnly broker is NOT skipped for a non-US user with --global', async () => {
+  clearLog();
+  configure({ dryRun: false, global: true, person: { country: 'FR' }, capsolver: null });
+  try {
+    await processBroker(null, US_ONLY_BROKER);
+  } catch (_) {}
+
+  const skipEntry = logged.find(
+    l => l.name === 'TestUSOnlyBroker' && l.status === 'skipped' && l.detail?.includes('US-only'),
+  );
+  assert.equal(skipEntry, undefined, '--global must search US-only brokers for non-US users too');
+  configure({ global: false });
+});

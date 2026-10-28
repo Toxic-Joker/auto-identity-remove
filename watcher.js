@@ -45,8 +45,12 @@ const SCORE_MODE   = process.argv.includes('--score');
 
 const PENDING_MODE    = process.argv.includes('--pending');
 const UPDATE_BROKERS  = process.argv.includes('--update-brokers');
-const BREACH_CHECK    = process.argv.includes('--breach-check');
+const BREACH_FIX      = process.argv.includes('--breach-fix');  // check, then open each breached site for you to log in
+const BREACH_CHECK    = process.argv.includes('--breach-check') || BREACH_FIX;
 const NO_CAPSOLVER    = process.argv.includes('--no-capsolver');
+const HANDOFF         = process.argv.includes('--handoff');     // pause for the user to solve CAPTCHAs (forces headed)
+const NO_STEALTH      = process.argv.includes('--no-stealth');  // don't mask automation fingerprints
+const GLOBAL          = process.argv.includes('--global');      // also search US-only brokers for non-US users
 const RESUME          = process.argv.includes('--resume');
 const SNAPSHOT        = process.argv.includes('--snapshot');
 const REPORT          = process.argv.includes('--report');
@@ -320,7 +324,6 @@ if (BREACH_CHECK) {
   const brokers = require('./brokers');
   const {
     collectEmails,
-    missingKeyMessage,
     runBreachCheck,
     formatBreachReport,
   } = require('./lib/hibp');
@@ -329,11 +332,9 @@ if (BREACH_CHECK) {
   const persons = getPersonsFromConfig(cfg);
   const emails  = collectEmails(persons);
   const apiKey  = cfg.hibp && cfg.hibp.apiKey;
-
-  if (!apiKey) {
-    console.log('\n' + missingKeyMessage() + '\n');
-    process.exit(0);
-  }
+  // No HIBP key: fall back to the free, keyless XposedOrNot lookup.
+  const checker = apiKey ? undefined : require('./lib/xon').checkBreachesFree;
+  const source  = apiKey ? 'Have I Been Pwned' : 'XposedOrNot (free)';
 
   if (emails.length === 0) {
     console.log('\nNo email addresses found in config.json. Add an "email" to your person(s) first.\n');
@@ -341,14 +342,52 @@ if (BREACH_CHECK) {
   }
 
   (async () => {
-    console.log(`\nChecking ${emails.length} email(s) against Have I Been Pwned...`);
-    const result = await runBreachCheck({ emails, apiKey, brokers });
-    console.log('\n' + formatBreachReport(result) + '\n');
+    console.log(`\nChecking ${emails.length} email(s) against ${source}...`);
+    const result = await runBreachCheck({ emails, apiKey, brokers, checker });
+    // The freeze advice names the three US bureaus; it doesn't apply elsewhere.
+    const inUS = persons.some(p => (p.country || 'US') === 'US');
+    console.log('\n' + formatBreachReport({ ...result, freeze: result.freeze && inUS, source }) + '\n');
+    if (BREACH_FIX) await fixBreachedSites(result.allBreaches);
     process.exit(0);
   })().catch(err => {
     console.error('breach-check error:', err.message);
     process.exit(1);
   });
+
+  // --breach-fix: only sites that actually leaked your email get opened, worst
+  // first. You log in yourself and change the password or delete the account.
+  async function fixBreachedSites(breaches) {
+    const rank = { high: 0, medium: 1, low: 2 };
+    const seen = new Set();
+    const sites = breaches
+      .filter(b => b.domain && !seen.has(b.domain) && seen.add(b.domain))
+      .sort((a, b) => rank[a.severity] - rank[b.severity]);
+    const noSite = breaches.filter(b => !b.domain).map(b => b.name);
+    if (sites.length === 0) {
+      console.log('No breached sites with a known website to open.');
+      return;
+    }
+    const { waitForHuman } = require('./lib/handoff');
+    const { chromium } = require('playwright');
+    const browser = await chromium.launch({ headless: false });
+    const page = await browser.newPage();
+    const done = [], skipped = [];
+    for (const b of sites) {
+      console.log(`\n[${b.severity}] ${b.name} (${b.domain}) - leaked: ${b.dataClasses.join(', ') || 'unknown'}`);
+      await page.goto(`https://${b.domain}`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      ((await waitForHuman(page, b, { task: 'breach' })) === 'skip' ? skipped : done).push(b.name);
+    }
+    await browser.close();
+    console.log(`\nBreach fix: ${done.length} handled, ${skipped.length} skipped${skipped.length ? ' (' + skipped.join(', ') + ')' : ''}.`);
+    if (noSite.length) console.log(`No website on file, check these yourself: ${noSite.join(', ')}`);
+    // Stealer logs come from malware on one of your devices, not a hacked site.
+    if (noSite.some(n => /stealer/i.test(n))) {
+      console.log('\n⚠️  Stealer logs: malware on a device you used copied saved passwords.');
+      console.log('   1. Run a full malware scan on every computer/phone you use.');
+      console.log('   2. Then change passwords for accounts saved in your browser, email first.');
+      console.log('   3. Turn on two-factor login (2FA) for email, bank and social accounts.');
+    }
+  }
 } else {
 
 // ── --complaints: generate regulator complaints for brokers past the legal
@@ -694,7 +733,7 @@ if (KNOW_MODE) {
   });
 } else {
 
-brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config });
+brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, handoff: HANDOFF, global: GLOBAL, snapshot: SNAPSHOT, personCount: persons.length, config });
 
 // Detect brokers that have been consistently unreachable across recent runs.
 // Defunct brokers still run - the warning is informational so the user can
@@ -770,11 +809,11 @@ async function _mainBody() {
   // Default to false (headed) on platforms where a display is likely present.
   // In Docker (no $DISPLAY on linux), default to headless: true so the tool actually runs.
   const headlessEnv = process.env.HEADLESS;
-  const headless = resolveHeadless();
+  const headless = HANDOFF ? false : resolveHeadless();
   console.log(`🖥  Browser mode: ${headless ? 'headless' : 'headed'}${headlessEnv === undefined && process.platform === 'linux' ? ' (auto-detected)' : ''}${isLowMemory() ? ' [low-memory profile]' : ''}`);
 
   const context = await chromium.launchPersistentContext(profileDir, buildLaunchOptions({ headless }));
-  await context.addInitScript(buildStealthScript());
+  if (!NO_STEALTH) await context.addInitScript(buildStealthScript());
 
   // ── Verify mode: T+7 post-submit verification loop ───────────────────────
   if (VERIFY) {
@@ -898,7 +937,7 @@ async function _mainBody() {
       console.log(`   Using masked email for submissions: ${submissionEmail}`);
     }
 
-    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail });
+    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, handoff: HANDOFF, global: GLOBAL, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail });
 
     // Rebuild the broker list for THIS person. brokers.js interpolates names,
     // city, state, zip and email into searchUrl and formFields, so reusing the
@@ -998,7 +1037,8 @@ async function _mainBody() {
   // faster run that quietly skips people. Domain-level toggles (cookie /
   // "Do Not Sell") get re-applied per person, which is harmless.
   const genericTotals = {};
-  for (const person of persons) {
+  // --only names specific brokers, so it skips the ~490-broker generic pass too.
+  for (const person of (ONLY_ARG ? [] : persons)) {
     if (persons.length > 1) {
       console.log(`\n── Generic brokers for ${person.firstName} ${person.lastName} ──`);
     }
